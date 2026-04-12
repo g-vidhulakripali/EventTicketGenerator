@@ -1,9 +1,9 @@
 import QRCode from "qrcode";
-import { AuditAction, AuditOutcome, PrismaClient, QrStatus, TicketStatus } from "@prisma/client";
+import { AuditAction, AuditOutcome, QrStatus, TicketStatus } from "@prisma/client";
 import { env } from "../../config/env";
 import { generateRandomToken, hashToken } from "../../utils/crypto";
 import { AppError } from "../../utils/errors";
-import { writeAuditLog } from "../audit/audit-service";
+import { PrismaDbClient, writeAuditLog } from "../audit/audit-service";
 
 function buildPayload(rawToken: string) {
   return `${env.QR_TOKEN_PREFIX}.${rawToken}`;
@@ -18,7 +18,7 @@ function extractRawToken(payload: string) {
   return payload.slice(prefix.length);
 }
 
-export async function issueQrForTicket(prisma: PrismaClient, ticketId: string, createdByUserId?: string) {
+export async function issueQrForTicket(prisma: PrismaDbClient, ticketId: string, createdByUserId?: string) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     include: { registrant: true, qrTokens: true },
@@ -73,7 +73,7 @@ export async function issueQrForTicket(prisma: PrismaClient, ticketId: string, c
   };
 }
 
-export async function revokeQrToken(prisma: PrismaClient, ticketId: string, reason: string, userId?: string) {
+export async function revokeQrToken(prisma: PrismaDbClient, ticketId: string, reason: string, userId?: string) {
   const activeQr = await prisma.qrToken.findFirst({
     where: { ticketId, status: QrStatus.ACTIVE },
     include: { ticket: true },
@@ -104,7 +104,7 @@ export async function revokeQrToken(prisma: PrismaClient, ticketId: string, reas
   });
 }
 
-export async function reissueQrToken(prisma: PrismaClient, ticketId: string, reason: string, userId?: string) {
+export async function reissueQrToken(prisma: PrismaDbClient, ticketId: string, reason: string, userId?: string) {
   await revokeQrToken(prisma, ticketId, reason, userId);
   const reissued = await issueQrForTicket(prisma, ticketId, userId);
 
@@ -119,14 +119,14 @@ export async function reissueQrToken(prisma: PrismaClient, ticketId: string, rea
   return reissued;
 }
 
-export async function getActiveQrForTicket(prisma: PrismaClient, ticketId: string) {
+export async function getActiveQrForTicket(prisma: PrismaDbClient, ticketId: string) {
   return prisma.qrToken.findFirst({
     where: { ticketId, status: QrStatus.ACTIVE },
     orderBy: { issuedAt: "desc" },
   });
 }
 
-export async function ensureActiveQrForTicket(prisma: PrismaClient, ticketId: string, createdByUserId?: string) {
+export async function ensureActiveQrForTicket(prisma: PrismaDbClient, ticketId: string, createdByUserId?: string) {
   const existing = await getActiveQrForTicket(prisma, ticketId);
   if (existing) {
     return existing;
@@ -135,7 +135,7 @@ export async function ensureActiveQrForTicket(prisma: PrismaClient, ticketId: st
   return issueQrForTicket(prisma, ticketId, createdByUserId);
 }
 
-export async function resolveQrPayload(prisma: PrismaClient, payload: string) {
+export async function resolveQrPayload(prisma: PrismaDbClient, payload: string) {
   const rawToken = extractRawToken(payload);
   const tokenHash = hashToken(rawToken);
   return prisma.qrToken.findUnique({

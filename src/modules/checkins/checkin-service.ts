@@ -98,7 +98,7 @@ export async function checkInByQr(
     });
 
     if (updated.count === 0 && !event.allowReentry) {
-      await writeAuditLog(tx as unknown as PrismaClient, {
+      await writeAuditLog(tx, {
         action: AuditAction.CHECKIN_DUPLICATE,
         outcome: AuditOutcome.INFO,
         eventId: event.id,
@@ -123,7 +123,7 @@ export async function checkInByQr(
       },
     });
 
-    await writeAuditLog(tx as unknown as PrismaClient, {
+    await writeAuditLog(tx, {
       action: AuditAction.CHECKIN_SUCCESS,
       outcome: AuditOutcome.SUCCESS,
       eventId: event.id,

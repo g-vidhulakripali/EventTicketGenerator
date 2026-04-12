@@ -64,6 +64,7 @@ export async function syncRegistrantsFromSource(
     const registrantData = buildRegistrantPayload(row);
 
     let registrantId: string | undefined;
+    let ticketId: string | undefined;
 
     await prisma.$transaction(async (tx) => {
       const registrant = await tx.registrant.upsert({
@@ -97,8 +98,12 @@ export async function syncRegistrantsFromSource(
         },
       });
 
-      await ensureActiveQrForTicket(tx as PrismaClient, ticket.id);
+      ticketId = ticket.id;
     });
+
+    if (ticketId) {
+      await ensureActiveQrForTicket(prisma, ticketId);
+    }
 
     // Write audit log AFTER the transaction commits, using the main prisma client
     // to avoid PgBouncer P2028 transaction-not-found errors
