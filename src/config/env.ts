@@ -48,6 +48,7 @@ const envSchema = z.object({
   SMTP_SECURE: booleanFromEnv.default(false),
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
+  TRIGGER_SECRET: z.string().default("change-me-trigger-secret"),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

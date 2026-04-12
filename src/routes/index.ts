@@ -35,6 +35,33 @@ export function registerRoutes(app: FastifyInstance) {
   app.get("/health", async () => ({ status: "ok" }));
 
   // ----------------------------------------------------------------
+  // One-call trigger: sync Google Sheets + send all pending QR emails
+  // No JWT needed — authenticated by TRIGGER_SECRET env var
+  // POST /api/v1/trigger  { "secret": "your-trigger-secret" }
+  // ----------------------------------------------------------------
+  app.post("/api/v1/trigger", async (request, reply) => {
+    const { secret } = request.body as { secret?: string };
+    if (!secret || secret !== app.config.TRIGGER_SECRET) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+
+    const eventSlug = app.config.DEFAULT_EVENT_SLUG;
+
+    const syncResult = await syncRegistrantsFromSource(
+      app.prisma,
+      new GoogleSheetsRegistrationSource(),
+      eventSlug,
+    );
+
+    const emailResult = await deliverPendingQrEmails(app.prisma, { eventSlug });
+
+    return reply.send({
+      sync: syncResult,
+      emails: emailResult,
+    });
+  });
+
+  // ----------------------------------------------------------------
   // Public mobile scan endpoint — no auth required
   // Mobile app: scan QR → POST /scan → receive { status, ticketId, name, email }
   // ----------------------------------------------------------------
