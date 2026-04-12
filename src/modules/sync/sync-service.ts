@@ -66,40 +66,38 @@ export async function syncRegistrantsFromSource(
     let registrantId: string | undefined;
     let ticketId: string | undefined;
 
-    await prisma.$transaction(async (tx) => {
-      const registrant = await tx.registrant.upsert({
-        where: {
-          eventId_sheetRowRef: {
-            eventId: event.id,
-            sheetRowRef: `${row.rowNumber}`,
-          },
-        },
-        update: registrantData,
-        create: {
+    const registrant = await prisma.registrant.upsert({
+      where: {
+        eventId_sheetRowRef: {
           eventId: event.id,
           sheetRowRef: `${row.rowNumber}`,
-          sheetRowNumber: row.rowNumber,
-          ...registrantData,
         },
-      });
-
-      registrantId = registrant.id;
-
-      const ticket = await tx.ticket.upsert({
-        where: { registrantId: registrant.id },
-        update: {
-          ticketType: row.ticketType || "standard",
-        },
-        create: {
-          eventId: event.id,
-          registrantId: registrant.id,
-          ticketType: row.ticketType || "standard",
-          ticketStatus: TicketStatus.ACTIVE,
-        },
-      });
-
-      ticketId = ticket.id;
+      },
+      update: registrantData,
+      create: {
+        eventId: event.id,
+        sheetRowRef: `${row.rowNumber}`,
+        sheetRowNumber: row.rowNumber,
+        ...registrantData,
+      },
     });
+
+    registrantId = registrant.id;
+
+    const ticket = await prisma.ticket.upsert({
+      where: { registrantId: registrant.id },
+      update: {
+        ticketType: row.ticketType || "standard",
+      },
+      create: {
+        eventId: event.id,
+        registrantId: registrant.id,
+        ticketType: row.ticketType || "standard",
+        ticketStatus: TicketStatus.ACTIVE,
+      },
+    });
+
+    ticketId = ticket.id;
 
     if (ticketId) {
       await ensureActiveQrForTicket(prisma, ticketId);
