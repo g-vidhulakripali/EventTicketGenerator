@@ -8,6 +8,7 @@ import { SampleRegistrationSource } from "../modules/sync/sample-registration-so
 import { issueQrForTicket, reissueQrToken, revokeQrToken } from "../modules/tickets/qr-service";
 import { getTicketStatus, lookupRegistrants } from "../modules/registrants/registrant-service";
 import { checkInByQr, manualCheckIn, validateQrScan } from "../modules/checkins/checkin-service";
+import { deliverPendingQrEmails } from "../modules/email/qr-email-service";
 import { UserRole } from "@prisma/client";
 import { getAuthUser } from "../utils/auth-user";
 import { AppError } from "../utils/errors";
@@ -121,6 +122,13 @@ export function registerRoutes(app: FastifyInstance) {
   app.post("/api/v1/tickets/issue-qr", adminOnly, async (request) => {
     const body = issueQrSchema.parse(request.body);
     return issueQrForTicket(app.prisma, body.ticketId, getAuthUser(request).sub);
+  });
+
+  // Send QR emails to all registrants who haven't received one yet
+  app.post("/api/v1/tickets/send-qr-emails", adminOnly, async (request) => {
+    const body = syncSchema.parse(request.body ?? {});
+    const eventSlug = getDefaultEventSlug(app, body.eventSlug);
+    return deliverPendingQrEmails(app.prisma, { eventSlug });
   });
 
   app.get("/api/v1/tickets/:ticketId/status", staffOnly, async (request) => {
