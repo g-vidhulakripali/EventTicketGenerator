@@ -10,7 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
-    "test": "DATABASE_URL=file:./test.db prisma db push --force-reset --skip-generate && vitest run"
+    "test": "vitest run"
   },
   "keywords": [
     "fastify",
