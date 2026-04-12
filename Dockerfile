@@ -5,6 +5,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
+ENV DATABASE_URL=file:/tmp/build-placeholder.db
 RUN npx prisma generate
 RUN npm run build
 
