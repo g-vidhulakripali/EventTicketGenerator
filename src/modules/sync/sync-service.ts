@@ -63,6 +63,8 @@ export async function syncRegistrantsFromSource(
 
     const registrantData = buildRegistrantPayload(row);
 
+    let registrantId: string | undefined;
+
     await prisma.$transaction(async (tx) => {
       const registrant = await tx.registrant.upsert({
         where: {
@@ -80,6 +82,8 @@ export async function syncRegistrantsFromSource(
         },
       });
 
+      registrantId = registrant.id;
+
       const ticket = await tx.ticket.upsert({
         where: { registrantId: registrant.id },
         update: {
@@ -94,15 +98,17 @@ export async function syncRegistrantsFromSource(
       });
 
       await ensureActiveQrForTicket(tx as PrismaClient, ticket.id);
+    });
 
-      await writeAuditLog(tx as PrismaClient, {
-        action: AuditAction.REGISTRANT_SYNCED,
-        outcome: AuditOutcome.SUCCESS,
-        eventId: event.id,
-        registrantId: registrant.id,
-        message: "Registrant synced from Google Sheets",
-        metadata: { rowNumber: row.rowNumber },
-      });
+    // Write audit log AFTER the transaction commits, using the main prisma client
+    // to avoid PgBouncer P2028 transaction-not-found errors
+    await writeAuditLog(prisma, {
+      action: AuditAction.REGISTRANT_SYNCED,
+      outcome: AuditOutcome.SUCCESS,
+      eventId: event.id,
+      registrantId,
+      message: "Registrant synced from Google Sheets",
+      metadata: { rowNumber: row.rowNumber },
     });
 
     processed += 1;

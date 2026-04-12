@@ -1,11 +1,14 @@
 import { buildApp } from "./app";
 import { env } from "./config/env";
 import { startGoogleSheetsSyncPolling } from "./modules/sync/sync-poller";
+import { getDirectPrismaClient } from "./config/prisma";
 
 async function start() {
   const app = buildApp();
+  const directPrisma = getDirectPrismaClient();
+
   const stopGoogleSheetsSyncPolling = startGoogleSheetsSyncPolling({
-    prisma: app.prisma,
+    prisma: directPrisma,
     config: app.config,
     logger: app.log,
   });
