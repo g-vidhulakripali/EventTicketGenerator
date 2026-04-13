@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { loginSchema, issueQrSchema, manualCheckInSchema, mobileScanSchema, pastedSheetImportSchema, revokeQrSchema, scanValidationSchema, statusLookupSchema, syncSchema } from "../utils/validation";
+import { attendanceAcceptSchema, loginSchema, issueQrSchema, manualCheckInSchema, mobileScanSchema, pastedSheetImportSchema, revokeQrSchema, scanValidationSchema, statusLookupSchema, syncSchema } from "../utils/validation";
 import { loginUser } from "../modules/auth/auth-service";
 import { syncRegistrantsFromSource } from "../modules/sync/sync-service";
 import { GoogleSheetsRegistrationSource } from "../modules/sync/google-sheets-provider";
@@ -12,6 +12,7 @@ import { deliverPendingQrEmails } from "../modules/email/qr-email-service";
 import { UserRole } from "@prisma/client";
 import { getAuthUser } from "../utils/auth-user";
 import { AppError } from "../utils/errors";
+import { acceptAttendance } from "../modules/attendance/attendance-service";
 
 function getDefaultEventSlug(app: FastifyInstance, eventSlug?: string) {
   return eventSlug ?? app.config.DEFAULT_EVENT_SLUG;
@@ -191,6 +192,47 @@ export function registerRoutes(app: FastifyInstance) {
       scannerDeviceId: body.scannerDeviceId,
       ipAddress: request.ip,
     });
+  });
+
+  app.post("/api/v1/attendance/accept", {
+    ...staffOnly,
+    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    const body = attendanceAcceptSchema.parse(request.body);
+    const user = getAuthUser(request);
+
+    const scanResult = await validateQrScan(app.prisma, {
+      qrPayload: body.qrPayload,
+      eventSlug: body.eventSlug,
+      scannerUserId: user.sub,
+      ipAddress: request.ip,
+    });
+
+    if (scanResult.status !== "valid" || !scanResult.ticketId || !scanResult.registrant) {
+      return reply.status(400).send({
+        status: "error",
+        error: `Ticket status: ${scanResult.status}`,
+      });
+    }
+
+    const sheet = await acceptAttendance({
+      eventType: body.eventType,
+      attendee: {
+        name: scanResult.registrant.fullName,
+        email: scanResult.registrant.email,
+        ticketId: scanResult.ticketId,
+      },
+    });
+
+    return {
+      status: "accepted",
+      attendee: {
+        name: scanResult.registrant.fullName,
+        email: scanResult.registrant.email,
+        ticketId: scanResult.ticketId,
+      },
+      sheet,
+    };
   });
 
   app.post("/api/v1/checkins/manual", staffOnly, async (request) => {

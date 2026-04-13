@@ -24,6 +24,12 @@ export const scanValidationSchema = z.object({
   scannerDeviceId: z.string().max(100).optional(),
 });
 
+export const attendanceAcceptSchema = z.object({
+  qrPayload: z.string().min(1),
+  eventSlug: z.string().min(1),
+  eventType: z.enum(["Conference", "Workshop"]),
+});
+
 // Schema for the public mobile /scan endpoint
 export const mobileScanSchema = z.object({
   qrPayload: z.string().min(1),

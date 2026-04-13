@@ -40,6 +40,7 @@ const envSchema = z.object({
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional().default(""),
   GOOGLE_SHEETS_POLL_INTERVAL_MS: z.coerce.number().default(60000),
   GOOGLE_SHEETS_ENABLED: booleanFromEnv.default(false),
+  GOOGLE_SHEETS_ATTENDED_VALUE: z.string().default("Attended"),
   EMAIL_ENABLED: booleanFromEnv.default(false),
   EMAIL_FROM: z.string().default("noreply@example.com"),
   EMAIL_REPLY_TO: z.string().optional().default(""),
