@@ -18,6 +18,9 @@ function parseTimestamp(value?: string) {
 
 function buildRegistrantPayload(row: SyncRow) {
   const rawDataJson = JSON.stringify(row);
+  // Fingerprint is Timestamp + Email to handle row shifts in Google Sheets
+  const fingerprint = `${row.timestamp || ''}:${row.email!.toLowerCase()}`.trim();
+  
   return {
     fullName: row.fullName!,
     email: row.email!.toLowerCase(),
@@ -27,6 +30,7 @@ function buildRegistrantPayload(row: SyncRow) {
     responseTimestamp: parseTimestamp(row.timestamp),
     syncChecksum: createChecksum(rawDataJson),
     rawDataJson,
+    fingerprint,
   };
 }
 
@@ -38,51 +42,55 @@ export async function syncRegistrantsFromSource(
   const event = await getEventBySlug(prisma, eventSlug);
   const syncStateId = `google-sheets:${event.id}`;
   const rows = await source.listRows();
-  const syncState = await prisma.syncState.upsert({
-    where: { id: syncStateId },
-    update: {},
-    create: { id: syncStateId, lastSheetRowNumber: 0 },
+
+  console.log(`[Sync] 📊 Sheet Scan: Found ${rows.length} rows.`);
+
+  // Integrity Check: Find rows missing from DB
+  const existingRegistrants = await prisma.registrant.findMany({
+    where: { eventId: event.id },
+    select: { sheetRowRef: true }
+  });
+  const existingRowRefs = new Set(existingRegistrants.map(r => r.sheetRowRef));
+
+  const rowsToProcess = rows.filter((row) => {
+    const fingerprint = `${row.timestamp || ''}:${row.email!.toLowerCase()}`.trim();
+    return !existingRowRefs.has(fingerprint);
   });
 
-  const newRows = rows.filter((row) => row.rowNumber > syncState.lastSheetRowNumber);
+  if (rowsToProcess.length > 0) {
+    console.log(`[Sync] 🔍 Discovery: Found ${rowsToProcess.length} rows to synchronize.`);
+  }
+
   let processed = 0;
   let skipped = 0;
 
-  for (const row of newRows) {
+  for (const row of rowsToProcess) {
     if (!row.fullName || !row.email) {
       skipped += 1;
-      await writeAuditLog(prisma, {
-        action: AuditAction.REGISTRANT_SYNCED,
-        outcome: AuditOutcome.FAILURE,
-        eventId: event.id,
-        message: "Skipped invalid Google Sheets row",
-        metadata: { rowNumber: row.rowNumber },
-      });
       continue;
     }
 
-    const registrantData = buildRegistrantPayload(row);
-
-    let registrantId: string | undefined;
-    let ticketId: string | undefined;
+    const { fingerprint, ...dbPayload } = buildRegistrantPayload(row);
+    const rowRef = fingerprint;
 
     const registrant = await prisma.registrant.upsert({
       where: {
         eventId_sheetRowRef: {
           eventId: event.id,
-          sheetRowRef: `${row.rowNumber}`,
+          sheetRowRef: rowRef,
         },
       },
-      update: registrantData,
+      update: {
+        ...dbPayload,
+        sheetRowNumber: row.rowNumber, // Keep row number updated for logging
+      },
       create: {
         eventId: event.id,
-        sheetRowRef: `${row.rowNumber}`,
+        sheetRowRef: rowRef,
         sheetRowNumber: row.rowNumber,
-        ...registrantData,
+        ...dbPayload,
       },
     });
-
-    registrantId = registrant.id;
 
     const ticket = await prisma.ticket.upsert({
       where: { registrantId: registrant.id },
@@ -97,37 +105,46 @@ export async function syncRegistrantsFromSource(
       },
     });
 
-    ticketId = ticket.id;
-
-    if (ticketId) {
-      await ensureActiveQrForTicket(prisma, ticketId);
+    if (ticket.id) {
+      await ensureActiveQrForTicket(prisma, ticket.id);
     }
 
-    // Write audit log AFTER the transaction commits, using the main prisma client
-    // to avoid PgBouncer P2028 transaction-not-found errors
     await writeAuditLog(prisma, {
       action: AuditAction.REGISTRANT_SYNCED,
       outcome: AuditOutcome.SUCCESS,
       eventId: event.id,
-      registrantId,
+      registrantId: registrant.id,
       message: "Registrant synced from Google Sheets",
       metadata: { rowNumber: row.rowNumber },
     });
 
     processed += 1;
+    if (processed % 20 === 0) {
+      console.log(`[Sync] ⏳ Progress: Synchronized ${processed}/${rowsToProcess.length}...`);
+    }
   }
 
   const lastRowNumber = rows.reduce(
     (currentMax, row) => Math.max(currentMax, row.rowNumber),
-    syncState.lastSheetRowNumber,
+    0
   );
-  await prisma.syncState.update({
+  
+  await prisma.syncState.upsert({
     where: { id: syncStateId },
-    data: {
+    update: {
+      lastSheetRowNumber: lastRowNumber,
+      lastSyncedAt: new Date(),
+    },
+    create: {
+      id: syncStateId,
       lastSheetRowNumber: lastRowNumber,
       lastSyncedAt: new Date(),
     },
   });
+
+  if (processed > 0) {
+    console.log(`[Sync] ✅ Integrity Verified: ${processed} rows synchronized.`);
+  }
 
   return { processed, skipped, lastRowNumber };
 }

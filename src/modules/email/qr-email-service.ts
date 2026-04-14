@@ -24,6 +24,10 @@ type PendingQrEmailResult = {
     email: string;
     message: string;
   }>;
+  sentDetails: Array<{
+    row: number | null;
+    email: string;
+  }>;
 };
 
 let transporter: nodemailer.Transporter | undefined;
@@ -238,8 +242,21 @@ export async function deliverQrTokenEmail(
     return false;
   }
 
+  const recipientEmail = qrToken.ticket.registrant.email.trim();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+  
+  // Guard against massive user typos that crash the Google SMTP server
+  if (!emailRegex.test(recipientEmail)) {
+    console.warn(`[SMTP Guard] ⚠️ Skipping Row ${qrToken.ticket.registrant.sheetRowNumber}: Invalid email format "${recipientEmail}"`);
+    await prisma.qrToken.update({
+      where: { id: qrToken.id },
+      data: { emailedAt: new Date(0) }, // Use epoch time as a tombstone so it leaves the queue
+    });
+    return false;
+  }
+
   await sender({
-    email: qrToken.ticket.registrant.email,
+    email: recipientEmail,
     fullName: qrToken.ticket.registrant.fullName,
     eventName: qrToken.ticket.event.name,
     qrPayload: qrToken.payload,
@@ -268,10 +285,11 @@ export async function deliverPendingQrEmails(
   sender: QrEmailSender = sendTicketQrEmail,
 ): Promise<PendingQrEmailResult> {
   if (!env.EMAIL_ENABLED) {
-    return { attempted: 0, sent: 0, failed: 0, failures: [] };
+    return { attempted: 0, sent: 0, failed: 0, failures: [], sentDetails: [] };
   }
 
   const event = await getEventBySlug(prisma, input.eventSlug);
+  
   const pendingTokens = await prisma.qrToken.findMany({
     where: {
       status: QrStatus.ACTIVE,
@@ -289,29 +307,71 @@ export async function deliverPendingQrEmails(
         },
       },
     },
-    orderBy: { issuedAt: "asc" },
-    take: input.limit ?? 5,
+    orderBy: { 
+      ticket: { 
+        registrant: { 
+          sheetRowNumber: "asc" 
+        } 
+      } 
+    },
+    take: input.limit ?? 30,
   });
+
+  if (pendingTokens.length > 0) {
+    console.log(`[Email Worker] 🔍 Found ${pendingTokens.length} tokens ready for delivery for event "${input.eventSlug}".`);
+  } else {
+    // DIAGNOSTIC LOG: If user sees 0 sending, explain why
+    const totalUnsent = await prisma.qrToken.count({
+      where: {
+        emailedAt: null,
+        ticket: { event: { id: event.id } }
+      }
+    });
+
+    if (totalUnsent > 0) {
+      console.log(`[Email Worker] ⚠️  Blocked: Found ${totalUnsent} unsent emails, but they are lacking QR images or are not ACTIVE.`);
+    } else {
+      console.log(`[Email Worker] ℹ️  Queue is empty for event "${input.eventSlug}".`);
+    }
+  }
 
   let sent = 0;
   let failed = 0;
   const failures: PendingQrEmailResult["failures"] = [];
+  const sentDetails: PendingQrEmailResult["sentDetails"] = [];
 
-  for (const qrToken of pendingTokens) {
-    try {
-      const delivered = await deliverQrTokenEmail(prisma, qrToken.id, sender);
-      if (delivered) {
-        sent += 1;
-        // Throttle: wait 3 seconds before sending the next one to avoid anti-spam flags
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+  const BATCH_SIZE = 5;
+  const DELAY_BETWEEN_BATCHES_MS = 2500;
+
+  for (let i = 0; i < pendingTokens.length; i += BATCH_SIZE) {
+    const batch = pendingTokens.slice(i, i + BATCH_SIZE);
+    
+    console.log(`[Email Worker] 📦 Sending batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.length} emails)...`);
+    
+    await Promise.all(batch.map(async (qrToken) => {
+      try {
+        const delivered = await deliverQrTokenEmail(prisma, qrToken.id, sender);
+        if (delivered) {
+          sent += 1;
+          sentDetails.push({
+            row: qrToken.ticket.registrant.sheetRowNumber,
+            email: qrToken.ticket.registrant.email,
+          });
+          console.log(`[Email Worker] ✅ Sent Row ${qrToken.ticket.registrant.sheetRowNumber} -> ${qrToken.ticket.registrant.email}`);
+        }
+      } catch (error) {
+        failed += 1;
+        failures.push({
+          qrTokenId: qrToken.id,
+          email: qrToken.ticket.registrant.email,
+          message: error instanceof Error ? error.message : "Unknown email delivery error",
+        });
+        console.error(`[Email Worker] ❌ Failure Row ${qrToken.ticket.registrant.sheetRowNumber}:`, error instanceof Error ? error.message : error);
       }
-    } catch (error) {
-      failed += 1;
-      failures.push({
-        qrTokenId: qrToken.id,
-        email: qrToken.ticket.registrant.email,
-        message: error instanceof Error ? error.message : "Unknown email delivery error",
-      });
+    }));
+    
+    if (i + BATCH_SIZE < pendingTokens.length) {
+      await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS));
     }
   }
 
@@ -320,5 +380,6 @@ export async function deliverPendingQrEmails(
     sent,
     failed,
     failures,
+    sentDetails,
   };
 }

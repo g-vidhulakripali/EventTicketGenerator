@@ -14,51 +14,72 @@ type SyncPollerOptions = {
 
 export function startGoogleSheetsSyncPolling(options: SyncPollerOptions) {
   if (!options.config.GOOGLE_SHEETS_ENABLED) {
+    console.log("[Worker] ℹ️ Google Sheets sync is disabled.");
     return () => {};
   }
 
   const source = options.source ?? new GoogleSheetsRegistrationSource();
   let isSyncInFlight = false;
-  const runSync = async () => {
-    if (isSyncInFlight) {
-      options.logger.warn("Skipping Google Sheets sync tick because the previous run is still active");
-      return;
-    }
+  let isEmailInFlight = false;
 
-    isSyncInFlight = true;
+  console.log("-----------------------------------------");
+  console.log(`[Worker] 🚀 Bootstrapping Background Services...`);
+  console.log(`[Worker] 📍 Target Event:  ${options.config.DEFAULT_EVENT_SLUG}`);
+  console.log(`[Worker] 📩 Email System:   ENABLED`);
+  console.log(`[Worker] ⏲️  Polling Rate:   Every 60s (Strict 5/min)`);
+  console.log("-----------------------------------------");
 
-    try {
-      const result = await syncRegistrantsFromSource(
-        options.prisma,
-        source,
-        options.config.DEFAULT_EVENT_SLUG,
-      );
-      const emailResult = await deliverPendingQrEmails(options.prisma, {
-        eventSlug: options.config.DEFAULT_EVENT_SLUG,
-      });
-
-      if (result.processed > 0 || result.skipped > 0 || emailResult.sent > 0 || emailResult.failed > 0) {
-        options.logger.info({
-          processed: result.processed,
-          skipped: result.skipped,
-          lastRowNumber: result.lastRowNumber,
-          emailsAttempted: emailResult.attempted,
-          emailsSent: emailResult.sent,
-          emailFailures: emailResult.failed,
-          emailFailureDetails: emailResult.failures,
-        }, "Completed Google Sheets sync tick");
+  const runTick = async () => {
+    // 1. SYNC PHASE (Parallel-ready)
+    const syncPhase = async () => {
+      if (isSyncInFlight) return;
+      isSyncInFlight = true;
+      try {
+        console.log(`[Sync] 🔄 Polling Google Sheets...`);
+        const result = await syncRegistrantsFromSource(
+          options.prisma,
+          source,
+          options.config.DEFAULT_EVENT_SLUG,
+        );
+        if (result.processed > 0) {
+          console.log(`[Sync] ✅ Success: ${result.processed} new items synced.`);
+        }
+      } catch (error: any) {
+        console.error(`[Sync] ❌ Error: ${error.message}`);
+      } finally {
+        isSyncInFlight = false;
       }
-    } catch (error) {
-      options.logger.error({ err: error }, "Google Sheets sync tick failed");
-    } finally {
-      isSyncInFlight = false;
-    }
+    };
+
+    // 2. EMAIL PHASE (Parallel-ready)
+    const emailPhase = async () => {
+      if (isEmailInFlight) return;
+      isEmailInFlight = true;
+      try {
+        const emailResult = await deliverPendingQrEmails(options.prisma, {
+          eventSlug: options.config.DEFAULT_EVENT_SLUG,
+          limit: 5, // Strictly 5 per minute
+        });
+
+        if (emailResult.sent > 0 || emailResult.failed > 0) {
+           console.log(`[Email] ✅ Results: Sent ${emailResult.sent} | Failed ${emailResult.failed}`);
+        }
+      } catch (error: any) {
+        console.error(`[Email] ❌ Error: ${error.message}`);
+      } finally {
+        isEmailInFlight = false;
+      }
+    };
+
+    // Run both in parallel so slow sync doesn't block fast emails (or vice versa)
+    await Promise.allSettled([syncPhase(), emailPhase()]);
   };
 
-  void runSync();
+  void runTick();
+  // Strictly 60 seconds to satisfy the 5-emails-per-minute limit
   const intervalId = setInterval(() => {
-    void runSync();
-  }, options.config.GOOGLE_SHEETS_POLL_INTERVAL_MS);
+    void runTick();
+  }, 60000); 
 
   return () => {
     clearInterval(intervalId);
