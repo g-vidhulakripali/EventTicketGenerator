@@ -14,7 +14,7 @@ async function main() {
     where: { slug: eventSlug },
     update: {
       name: eventName,
-      venue: "Main Hall",
+      venue: "H0002, Hochschule Schmalkalden",
       allowReentry: false,
       capacity: 500,
       isActive: true,
@@ -22,7 +22,7 @@ async function main() {
     create: {
       slug: eventSlug,
       name: eventName,
-      venue: "Main Hall",
+      venue: "H0002, Hochschule Schmalkalden",
       allowReentry: false,
       capacity: 500,
     },

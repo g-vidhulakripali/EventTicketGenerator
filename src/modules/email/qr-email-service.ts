@@ -3,6 +3,7 @@ import path from "path";
 import { PrismaClient, QrStatus, TicketStatus } from "@prisma/client";
 import { env } from "../../config/env";
 import { getEventBySlug } from "../events/event-service";
+import { generateTicketPdf } from "../../utils/pdf-generator";
 
 type QrEmailPayload = {
   email: string;
@@ -74,7 +75,7 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
   textParts.push(`Thank you for registering for the ${input.eventName} 🚀`);
   textParts.push(`We're excited to have you join us for this experience of learning, networking, and innovation.`);
   textParts.push("");
-  textParts.push(`📍 Venue: Hochschule Schmalkalden`);
+  textParts.push(`📍 Venue: H0002, Hochschule Schmalkalden`);
   textParts.push(`🗓 Date: 15 April 2026`);
   textParts.push(`⏰ Conference: 10:00 AM – 12:00 PM`);
   textParts.push(`⏰ Workshop: 13:00 PM – 17:00 PM`);
@@ -129,7 +130,7 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
       margin-bottom: 24px;
       font-size: 14px;
     ">
-      <p style="margin: 6px 0;">📍 <strong>Venue:</strong> Hochschule Schmalkalden</p>
+      <p style="margin: 6px 0;">📍 <strong>Venue:</strong> H0002, Hochschule Schmalkalden</p>
       <p style="margin: 6px 0;">📅 <strong>Date:</strong> 15 April 2026</p>
       <p style="margin: 6px 0;">⏰ <strong>Conference:</strong> 10:00 AM – 12:00 PM</p>
       <p style="margin: 6px 0;">🛠️ <strong>Workshop:</strong> 13:00 PM – 17:00 PM</p>
@@ -165,6 +166,28 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
     },
   ];
 
+  try {
+    let localBannerPath: string | undefined = undefined;
+    if (bannerIsLocal && env.EMAIL_BANNER_URL) {
+      localBannerPath = path.join(process.cwd(), env.EMAIL_BANNER_URL);
+    }
+
+    const pdfBuffer = await generateTicketPdf({
+      eventName: input.eventName,
+      fullName: input.fullName,
+      qrImageBuffer,
+      bannerImagePath: localBannerPath,
+    });
+
+    attachments.push({
+      filename: `${input.eventName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_ticket.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    });
+  } catch (error) {
+    console.error("Failed to generate PDF ticket:", error);
+  }
+
   if (bannerIsLocal && env.EMAIL_BANNER_URL) {
     attachments.push({
       filename: path.basename(env.EMAIL_BANNER_URL),
@@ -177,7 +200,7 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
     from: env.EMAIL_FROM,
     to: input.email,
     replyTo: env.EMAIL_REPLY_TO || undefined,
-    subject: `${input.eventName} entry QR code`,
+    subject: `🎟️ Your Ticket for ${input.eventName} – QR Code Inside`,
     text: textParts.join("\n"),
     html: htmlParts.join(""),
     attachments,
@@ -267,7 +290,7 @@ export async function deliverPendingQrEmails(
       },
     },
     orderBy: { issuedAt: "asc" },
-    take: input.limit ?? 50,
+    take: input.limit ?? 5,
   });
 
   let sent = 0;
@@ -279,6 +302,8 @@ export async function deliverPendingQrEmails(
       const delivered = await deliverQrTokenEmail(prisma, qrToken.id, sender);
       if (delivered) {
         sent += 1;
+        // Throttle: wait 3 seconds before sending the next one to avoid anti-spam flags
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
     } catch (error) {
       failed += 1;
