@@ -75,7 +75,7 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
   textParts.push(`We're excited to have you join us for this experience of learning, networking, and innovation.`);
   textParts.push("");
   textParts.push(`📍 Venue: Hochschule Schmalkalden`);
-  textParts.push(`🗓️ Date: 15 April 2026`);
+  textParts.push(`🗓 Date: 15 April 2026`);
   textParts.push(`⏰ Conference: 10:00 AM – 12:00 PM`);
   textParts.push(`⏰ Workshop: 13:00 PM – 17:00 PM`);
   textParts.push("");
@@ -90,24 +90,72 @@ export async function sendTicketQrEmail(input: QrEmailPayload) {
     bannerIsLocal = true;
   }
 
-  htmlParts.push(`<div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; color: #333; line-height: 1.6;">`);
+  htmlParts.push(`
+<div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; background-color: #f5f7fb; padding: 20px;">
+  
+  <!-- Card Container -->
+  <div style="background-color: #ffffff; border-radius: 8px; padding: 24px;">
 
-  if (env.EMAIL_BANNER_URL) {
-    htmlParts.push(`<div style="margin-bottom: 24px;">`);
-    htmlParts.push(`  <img src="${bannerSrc}" alt="${input.eventName} Banner" style="width: 100%; max-width: 650px; height: auto;" />`);
-    htmlParts.push(`</div>`);
-  }
+    <!-- Banner -->
+    ${env.EMAIL_BANNER_URL ? `
+      <div style="margin-bottom: 24px; text-align: center;">
+        <img src="${bannerSrc}" alt="${input.eventName} Banner" 
+             style="width: 100%; max-width: 650px; border-radius: 6px;" />
+      </div>
+    ` : ""}
 
-  htmlParts.push(`<h2 style="color: #0d6efd; font-size: 24px; margin-top: 0; margin-bottom: 24px;">🎉 Registration Confirmed – You're On Board!</h2>`);
-  htmlParts.push(`<p style="font-size: 16px; margin-bottom: 20px;">Hi ${input.fullName},</p>`);
-  htmlParts.push(`<p style="font-size: 16px; margin-bottom: 20px;">Thank you for registering for the <strong>${input.eventName}</strong> 🚀</p>`);
-  htmlParts.push(`<p style="font-size: 16px; margin-bottom: 30px;">We're excited to have you join us for this experience of learning, networking, and innovation.</p>`);
-  htmlParts.push(`<div>`);
-  htmlParts.push(`  <p style="font-size: 14px; margin-bottom: 8px;">Please present this QR code securely at entry.</p>`);
-  htmlParts.push(`  <p><img src="cid:ticket-qr" alt="Event QR code" /></p>`);
-  htmlParts.push(`</div>`);
+    <!-- Title -->
+    <h2 style="color: #2563eb; font-size: 24px; margin-bottom: 20px;">
+      🎉 Registration Confirmed – You're On Board!
+    </h2>
 
-  htmlParts.push(`</div>`);
+    <!-- Greeting -->
+    <p style="font-size: 16px;">Hi ${input.fullName},</p>
+
+    <p style="font-size: 16px;">
+      Thank you for registering for the 
+      <strong>${input.eventName}</strong> 🚀
+    </p>
+
+    <p style="font-size: 16px; margin-bottom: 20px;">
+      We’re excited to have you join us for this experience of learning, networking, and innovation.
+    </p>
+
+    <!-- Event Details Box -->
+    <div style="
+      background-color: #f1f5f9;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-size: 14px;
+    ">
+      <p style="margin: 6px 0;">📍 <strong>Venue:</strong> Hochschule Schmalkalden</p>
+      <p style="margin: 6px 0;">📅 <strong>Date:</strong> 15 April 2026</p>
+      <p style="margin: 6px 0;">⏰ <strong>Conference:</strong> 10:00 AM – 12:00 PM</p>
+      <p style="margin: 6px 0;">🛠️ <strong>Workshop:</strong> 13:00 PM – 17:00 PM</p>
+    </div>
+
+    <!-- QR Code Section -->
+    <div style="text-align: center; margin-bottom: 24px;">
+      <p style="font-size: 14px; margin-bottom: 10px;">
+        Please present this QR code securely at entry.
+      </p>
+      <img src="cid:ticket-qr" alt="Event QR code" 
+           style="width: 160px; height: 160px;" />
+    </div>
+
+    <!-- Footer -->
+
+    <p style="font-size: 14px;">We look forward to seeing you!</p>
+
+    <p style="margin-top: 20px;">
+      Regards,<br/>
+      <strong>HSM Developer Community</strong>
+    </p>
+
+  </div>
+</div>
+`);
 
   const attachments: nodemailer.SendMailOptions["attachments"] = [
     {
